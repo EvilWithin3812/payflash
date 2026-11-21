@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build: Maven + JDK to compile, a small JRE image to run.
 
 # ---- build stage ----

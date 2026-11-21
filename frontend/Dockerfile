@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # ---- build: compile the React app ----
 FROM node:22-alpine AS build
 WORKDIR /app

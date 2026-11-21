@@ -126,7 +126,6 @@ services:
         condition: service_healthy
       notifications-db:
         condition: service_healthy
-    restart: unless-stopped
 
   # ---------------------------------------------------------------- application services
 
@@ -174,7 +173,6 @@ services:
       start_period: 60s
       retries: 6
     mem_limit: 1g
-    restart: unless-stopped
 
   # Notification service: consumes wallet.transactions from Kafka, sends email, owns its own database.
   notification-service:
@@ -199,7 +197,6 @@ services:
       start_period: 60s
       retries: 6
     mem_limit: 512m
-    restart: unless-stopped
 
   # Spring Cloud Gateway: single entry point, routing, circuit breakers, request ids.
   gateway:
@@ -223,7 +220,6 @@ services:
       start_period: 40s
       retries: 6
     mem_limit: 512m
-    restart: unless-stopped
 
   # React frontend (nginx) -> gateway. Open http://localhost:3000
   web:
@@ -234,7 +230,6 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
-    restart: unless-stopped
 
   # ---------------------------------------------------------------- observability
 
