@@ -1,0 +1,79 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Preserve the client IP for the services' rate limiter (they trust X-Forwarded-For from private proxies).
+          # Only callers on private networks (nginx inside Docker, localhost) may pass X-Forwarded-* through;
+          # a client on the internet cannot spoof its IP with a forged header.
+          trusted-proxies: "(10\\..*|172\\.(1[6-9]|2[0-9]|3[01])\\..*|192\\.168\\..*|127\\..*|0:0:0:0:0:0:0:1|::1)"
+          x-forwarded:
+            enabled: true
+          routes:
+            # Notification service: its own database, validates JWTs itself.
+            - id: notifications
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8091}
+              predicates:
+                - Path=/api/v1/notifications/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: notifications
+                    fallbackUri: forward:/fallback/notifications
+            # Live flash-sale stock: WebSocket upgrade is proxied as-is (no circuit breaker on a long-lived socket).
+            - id: core-websocket
+              uri: ${CORE_SERVICE_URL:http://localhost:8090}
+              predicates:
+                - Path=/ws/**
+            # Everything else belongs to the core app (wallet, payments, sales, auth, API docs).
+            - id: core
+              uri: ${CORE_SERVICE_URL:http://localhost:8090}
+              predicates:
+                - Path=/api/**,/v3/api-docs/**,/swagger-ui/**,/swagger-ui.html
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: core
+                    fallbackUri: forward:/fallback/core
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50          # open when half of the last 20 calls failed
+        wait-duration-in-open-state: 10s    # then let a few trial calls through
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    configs:
+      default:
+        # Generous: a Razorpay order call can take a few seconds. Money endpoints are idempotent,
+        # so a client retry after a gateway timeout can never charge twice.
+        timeout-duration: 15s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    gateway:
+      access: read-only
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

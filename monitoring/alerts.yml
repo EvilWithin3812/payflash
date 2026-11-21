@@ -1,0 +1,65 @@
+# Alert rules, evaluated by Prometheus. See them firing at http://localhost:9090/alerts (in production, through
+# the SSH tunnel). To get them by email/Slack/Telegram, add Alertmanager or let Grafana alerting read these
+# metrics. Whole-site downtime is caught from outside by an uptime monitor on /api/v1/health (DEPLOY.md).
+groups:
+  - name: payflash
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} is not answering Prometheus"
+          description: "{{ $labels.instance }} has been unreachable for 2 minutes."
+
+      - alert: HighServerErrorRate
+        expr: |
+          sum by (application) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / sum by (application) (rate(http_server_requests_seconds_count[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 5% of requests to {{ $labels.application }} fail with 5xx"
+
+      - alert: SlowResponses
+        expr: |
+          histogram_quantile(0.95, sum by (le, application) (rate(http_server_requests_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 latency of {{ $labels.application }} is above 1 second"
+
+      - alert: OutboxBacklog
+        expr: max(payflash_outbox_pending) > 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Outbox events are piling up (Kafka down or publisher stuck); emails are delayed"
+
+      - alert: NotificationConsumerLag
+        expr: max(kafka_consumer_fetch_manager_records_lag_max{application="notification-service"}) > 1000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The notification service is falling behind on Kafka events"
+
+      - alert: CircuitBreakerOpen
+        expr: max by (name) (resilience4j_circuitbreaker_state{state="open"}) == 1
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Gateway circuit breaker {{ $labels.name }} is open: a service behind it is failing"
+
+      - alert: LoginAttackSuspected
+        expr: sum(rate(payflash_ratelimit_rejected_total{policy="auth"}[5m])) * 60 > 30
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Many sign-in requests are being rate limited (possible password guessing)"
+
+      - alert: DiskAlmostFull
+        expr: max(disk_free_bytes / disk_total_bytes) < 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Less than 10% disk space left on {{ $labels.application }}'s volume"

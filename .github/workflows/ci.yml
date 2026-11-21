@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # Testcontainers uses the Docker daemon that GitHub runners already have.
+      - name: Build and test
+        run: ./mvnw -B verify
+      - name: Build Docker image
+        run: docker build -t payflash:${{ github.sha }} .
+
+  services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [notification-service, api-gateway]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+      - name: Build and test
+        run: ./mvnw -B verify
+      - name: Build Docker image
+        run: docker build -t payflash-${{ matrix.service }}:${{ github.sha }} .
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Build Docker image
+        run: docker build -t payflash-web:${{ github.sha }} .

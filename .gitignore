@@ -1,0 +1,11 @@
+target/
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.log
+.env
+setup-files/
+
+# Database backups (contain personal data): never commit them
+backups/

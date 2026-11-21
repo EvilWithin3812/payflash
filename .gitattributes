@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers: always check them out with LF line endings, even on Windows.
+*.sh  text eol=lf
+mvnw  text eol=lf
+*.lua text eol=lf

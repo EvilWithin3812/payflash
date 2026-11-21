@@ -1,0 +1,11 @@
+target/
+.idea/
+.git/
+*.iml
+.env
+frontend/
+load/
+setup-files/
+monitoring/
+
+backups/

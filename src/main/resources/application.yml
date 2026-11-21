@@ -1,0 +1,138 @@
+server:
+  port: ${SERVER_PORT:8090}
+  # Trust X-Forwarded-For from the gateway / nginx (private-network proxies only), so rate limiting and logs
+  # see the real client IP instead of the proxy's.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: payflash
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/payflash}
+    username: ${DB_USER:payflash}
+    password: ${DB_PASSWORD:payflash}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    template:
+      observation-enabled: true   # propagate the trace id in Kafka headers
+    listener:
+      observation-enabled: true
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  # Account emails (verification, password reset). Local dev: Mailpit catches them (http://localhost:8025).
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+      mail.smtp.starttls.enable: ${MAIL_STARTTLS:false}
+
+app:
+  # Set PRODUCTION=true on any public deployment: the app then refuses to start with demo settings
+  # (the published dev JWT key, simulated top-ups, email switched off, a localhost public URL).
+  production: ${PRODUCTION:false}
+  # Where the web app is reachable; used to build the links in emails.
+  public-url: ${PUBLIC_URL:http://localhost:3000}
+  mail:
+    enabled: ${MAIL_ENABLED:true}
+    from: ${MAIL_FROM:PayFlash <no-reply@payflash.local>}
+  # Public showcase: shared demo logins with play money and an always-live flash sale (see DemoMode).
+  demo:
+    enabled: ${DEMO_MODE:false}
+    password: ${DEMO_PASSWORD:try-payflash-demo}
+  auth:
+    # Unverified users can log in and browse, but not add, send or spend money.
+    require-verified-email: ${REQUIRE_VERIFIED_EMAIL:true}
+    # Failed logins allowed per account before it is locked for the lock period (stops password guessing
+    # spread across many IPs, which the per-IP rate limit can't see).
+    max-failed-logins: 5
+    login-lock: 15m
+  jwt:
+    # Base64-encoded 256-bit secret. Override with JWT_SECRET in any real environment.
+    secret: ${JWT_SECRET:ZGV2LW9ubHktc2VjcmV0LWNoYW5nZS1tZS1wbGVhc2UtMzItYnl0ZXMtbG9uZyE=}
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+  outbox:
+    publisher-enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+    poll-interval-ms: 1000
+    batch-size: 100
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    auth: 10    # per minute per IP: signup / login / refresh
+    money: 20   # per minute per user: top-ups, transfers, payment orders
+    api: 120    # per minute per user: everything else
+  payments:
+    # Instant fake top-up at /api/v1/wallet/topup. Off unless switched on (docker-compose.yml does, for the demo).
+    simulated-topup-enabled: ${SIMULATED_TOPUP_ENABLED:false}
+  sales:
+    sweep-interval-ms: 2000       # how often unpaid holds are expired
+    broadcast-interval-ms: 500    # how often live stock is pushed over WebSocket
+  # Optional: creates/promotes an ADMIN account on startup (needed to create flash sales).
+  bootstrap-admin:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  razorpay:
+    # Test-mode keys from https://dashboard.razorpay.com/app/keys - set as env vars, never commit them.
+    key-id: ${RAZORPAY_KEY_ID:}
+    key-secret: ${RAZORPAY_KEY_SECRET:}
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+
+management:
+  health:
+    mail:
+      enabled: false   # an SMTP outage must not mark the app DOWN; users can ask for the email again
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}   # 1.0 = trace every request (dev); use ~0.1 in production
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # Histogram buckets so Grafana can compute p95/p99 across instances (histogram_quantile).
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:true}   # the production override turns Swagger off
+  swagger-ui:
+    path: /swagger-ui.html

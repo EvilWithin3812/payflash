@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayFlash - Razorpay test top-up</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    textarea, input { width: 100%; box-sizing: border-box; padding: .5rem; font: inherit; }
+    button { margin-top: 1rem; padding: .6rem 1.2rem; font: inherit; cursor: pointer; }
+    pre { background: #f3f4f6; padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
+    .note { color: #6b7280; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Razorpay test top-up</h1>
+  <p class="note">Dev tool for trying the real payment flow before the React frontend exists.
+    Get a token from <code>POST /api/v1/auth/login</code> in <a href="/swagger-ui.html">Swagger</a>.
+    Pay with a Razorpay <a href="https://razorpay.com/docs/payments/payments/test-card-details/" target="_blank" rel="noopener">test card</a> or test UPI ID.</p>
+
+  <label for="token">Access token</label>
+  <textarea id="token" rows="3" placeholder="eyJhbGciOi..."></textarea>
+
+  <label for="amount">Amount (INR)</label>
+  <input id="amount" type="number" min="1" step="0.01" value="500">
+
+  <button id="pay">Pay with Razorpay</button>
+
+  <h2>Log</h2>
+  <pre id="log">-</pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (label, data) => {
+      logEl.textContent = `${label}\n${JSON.stringify(data, null, 2)}\n\n` + (logEl.textContent === '-' ? '' : logEl.textContent);
+    };
+
+    async function api(path, token, body, extraHeaders = {}) {
+      const res = await fetch(path, {
+        method: body ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...extraHeaders },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error(json.message || res.status), { body: json });
+      return json;
+    }
+
+    document.getElementById('pay').addEventListener('click', async () => {
+      const token = document.getElementById('token').value.trim();
+      const amount = Number(document.getElementById('amount').value);
+      try {
+        const order = await api('/api/v1/payments/topup-orders', token, { amount },
+          { 'Idempotency-Key': crypto.randomUUID() });
+        log('Order created', order);
+
+        const checkout = new Razorpay({
+          key: order.keyId,
+          order_id: order.orderId,
+          amount: order.amountMinor,
+          currency: order.currency,
+          name: 'PayFlash',
+          description: 'Wallet top-up',
+          handler: async (resp) => {
+            try {
+              const verified = await api('/api/v1/payments/verify', token, {
+                razorpayOrderId: resp.razorpay_order_id,
+                razorpayPaymentId: resp.razorpay_payment_id,
+                razorpaySignature: resp.razorpay_signature,
+              });
+              log('Verified - wallet credited', verified);
+              log('Wallet', await api('/api/v1/wallet', token));
+            } catch (e) { log('Verify failed', e.body || String(e)); }
+          },
+        });
+        checkout.on('payment.failed', (resp) => log('Payment failed', resp.error));
+        checkout.open();
+      } catch (e) {
+        log('Error', e.body || String(e));
+      }
+    });
+  </script>
+</body>
+</html>

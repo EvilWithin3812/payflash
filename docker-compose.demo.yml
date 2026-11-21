@@ -1,0 +1,19 @@
+# Public demo (a live link to share with recruiters). Use on top of the production files:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml up -d --build
+# deploy/setup-server.sh runs exactly this.
+#
+# Everything from the production override stays (real secrets, Redis password, nothing exposed but the site),
+# plus:
+#   * DEMO_MODE: one-click demo logins with play money, and a flash sale that is always live.
+#   * Simulated top-ups: "Add money" is free play money (no real payments).
+#   * The web app listens on 127.0.0.1:8080 only; Caddy on the host serves it over HTTPS.
+services:
+  app:
+    environment:
+      DEMO_MODE: "true"
+      SIMULATED_TOPUP_ENABLED: "true"
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-try-payflash-demo}
+
+  web:
+    ports: !override
+      - "127.0.0.1:8080:80"
