@@ -67,7 +67,7 @@ export function Login() {
         <div className="mt-6 border-t border-slate-200 pt-5">
           <p className="text-sm font-semibold text-slate-900">Just looking? Try it in one click</p>
           <p className="mt-1 text-xs text-slate-500">
-            Shared demo accounts with play money. Nothing here is real money.
+            Shared demo accounts with play money. Nothing here is real money.{demo.data.accounts[0]?.pin && <> Their transaction PIN is <strong>{demo.data.accounts[0].pin}</strong>.</>}
           </p>
           <div className="mt-3 grid gap-2">
             {demo.data.accounts.map((a) => (

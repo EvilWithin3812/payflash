@@ -28,9 +28,14 @@ public class AccountService {
     private final OutboxService outbox;
     private final AccountMailer mailer;
     private final AuthService authService;
+    private final TransactionPins pins;
+    private final com.payflash.request.PaymentRequestRepository paymentRequests;
 
     public AccountService(UserRepository users, UserTokenRepository userTokens, PasswordEncoder passwordEncoder,
-                          WalletService wallets, OutboxService outbox, AccountMailer mailer, AuthService authService) {
+                          WalletService wallets, OutboxService outbox, AccountMailer mailer, AuthService authService,
+                          TransactionPins pins, com.payflash.request.PaymentRequestRepository paymentRequests) {
+        this.pins = pins;
+        this.paymentRequests = paymentRequests;
         this.users = users;
         this.userTokens = userTokens;
         this.passwordEncoder = passwordEncoder;
@@ -42,7 +47,7 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public MeResponse me(Long userId) {
-        return MeResponse.from(active(userId));
+        return MeResponse.from(active(userId), pins.threshold());
     }
 
     /**
@@ -71,6 +76,8 @@ public class AccountService {
         String email = user.getEmail();
         String name = user.getFullName();
         userTokens.deleteAllFor(userId);
+        // Nobody can pay or be paid through this account any more.
+        paymentRequests.cancelAllPendingFor(userId, Instant.now());
         // A random hash nobody knows the password for: the account can never log in again.
         user.anonymise(passwordEncoder.encode(UUID.randomUUID().toString()));
         authService.publishRevocation(user);

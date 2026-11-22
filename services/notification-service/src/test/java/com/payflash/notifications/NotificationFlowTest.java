@@ -113,6 +113,29 @@ class NotificationFlowTest {
     }
 
     @Test
+    void paymentRequestsEmailThePersonWhoHasToAct() throws Exception {
+        long asha = 6_000_000 + (long) (Math.random() * 1_000_000);
+        var requester = party(asha, "Asha");
+        var payer = party(asha + 1, "Ravi");
+        // Exactly what the core app's outbox publishes on payment.requests.
+        var asked = new PaymentRequestEvent(UUID.randomUUID(), "REQUESTED", 77L, new BigDecimal("300.00"), "INR",
+                "Dinner", requester, payer, Instant.now());
+        var declined = new PaymentRequestEvent(UUID.randomUUID(), "DECLINED", 77L, new BigDecimal("300.00"), "INR",
+                "Dinner", requester, payer, Instant.now());
+        kafka.send(KafkaConfig.REQUESTS_TOPIC, "77", mapper.writeValueAsString(asked)).get();
+        kafka.send(KafkaConfig.REQUESTS_TOPIC, "77", mapper.writeValueAsString(declined)).get();
+
+        await().atMost(Duration.ofSeconds(30)).until(() -> !repository.findByEventReference(declined.reference()).isEmpty());
+        verify(mailSender).send(argThat((SimpleMailMessage m) -> m.getTo()[0].equals(payer.email())
+                && m.getSubject().equals("Asha requested ₹300.00 from you")
+                && m.getText().contains("go to Requests")));
+        verify(mailSender).send(argThat((SimpleMailMessage m) -> m.getTo()[0].equals(requester.email())
+                && m.getSubject().equals("Ravi declined your request for ₹300.00")));
+        assertThat(repository.findByEventReference(asked.reference())).singleElement()
+                .satisfies(n -> assertThat(n.getUserId()).isEqualTo(payer.userId()));
+    }
+
+    @Test
     void deletingAnAccountDeletesItsNotifications() throws Exception {
         long user = 4_000_000 + (long) (Math.random() * 1_000_000);
         var purchase = new TransactionEvent(UUID.randomUUID(), "PURCHASE", 31L, null, new BigDecimal("10.00"), "INR",

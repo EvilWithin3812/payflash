@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { Page, Sale, SaleOrder, Transaction, Wallet } from './types'
+import type { Counterparty, Me, Page, PaymentRequest, RequestSummary, Sale, SaleOrder, Transaction, Wallet } from './types'
 
 export const keys = {
   wallet: ['wallet'] as const,
@@ -9,7 +9,35 @@ export const keys = {
   sale: (id: number) => ['sales', id] as const,
   orders: ['orders'] as const,
   order: (token: string) => ['orders', token] as const,
+  me: ['me'] as const,
+  requests: (direction: 'INCOMING' | 'OUTGOING') => ['requests', direction] as const,
+  requestSummary: ['requests', 'summary'] as const,
+  recipients: ['recipients'] as const,
 }
+
+export const useMe = () =>
+  useQuery({ queryKey: keys.me, queryFn: async () => (await api.get<Me>('/users/me')).data })
+
+export const useRequests = (direction: 'INCOMING' | 'OUTGOING') =>
+  useQuery({
+    queryKey: keys.requests(direction),
+    queryFn: async () =>
+      (await api.get<Page<PaymentRequest>>('/requests', { params: { direction, size: 50 } })).data,
+    refetchInterval: 20_000,
+  })
+
+/** Drives the badge on the "Requests" menu item. */
+export const useRequestSummary = (enabled = true) =>
+  useQuery({
+    queryKey: keys.requestSummary,
+    queryFn: async () => (await api.get<RequestSummary>('/requests/summary')).data,
+    refetchInterval: 30_000,
+    enabled,
+  })
+
+/** People I sent money to recently, newest first. */
+export const useRecipients = () =>
+  useQuery({ queryKey: keys.recipients, queryFn: async () => (await api.get<Counterparty[]>('/wallet/recipients')).data })
 
 export const useWallet = () =>
   useQuery({ queryKey: keys.wallet, queryFn: async () => (await api.get<Wallet>('/wallet')).data })
@@ -32,7 +60,7 @@ export const useOrders = () =>
 
 export interface DemoInfo {
   enabled: boolean
-  accounts: { email: string; password: string; fullName: string }[]
+  accounts: { email: string; password: string; fullName: string; pin: string }[]
 }
 
 /** Shared demo logins; only filled when the server runs with DEMO_MODE=true. */

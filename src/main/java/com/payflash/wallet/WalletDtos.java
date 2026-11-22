@@ -28,11 +28,17 @@ public final class WalletDtos {
             BigDecimal amount) {
     }
 
+    /** {@code pin}: the transaction PIN, needed when the amount is above the PIN threshold. */
     public record TransferRequest(
             @NotBlank @Email String recipientEmail,
             @NotNull @DecimalMin("0.01") @DecimalMax("100000.00") @Digits(integer = 15, fraction = 2)
             BigDecimal amount,
-            @Size(max = 255) String note) {
+            @Size(max = 255) String note,
+            @Size(max = 6) String pin) {
+
+        public TransferRequest(String recipientEmail, BigDecimal amount, String note) {
+            this(recipientEmail, amount, note, null);
+        }
     }
 
     /** The other person in a transfer, so each side can see who sent or received the money. */

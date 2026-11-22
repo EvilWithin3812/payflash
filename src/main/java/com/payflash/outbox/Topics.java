@@ -10,6 +10,9 @@ public final class Topics {
     /** Account lifecycle events (account deleted) for services that keep per-user data. */
     public static final String USER_ACCOUNTS = "user.accounts";
 
+    /** Payment requests asked, declined or cancelled (the notification service tells the other person). */
+    public static final String PAYMENT_REQUESTS = "payment.requests";
+
     private Topics() {
     }
 }

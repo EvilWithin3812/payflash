@@ -97,6 +97,11 @@ public class DemoSeeder implements ApplicationRunner {
             if (!encoder.matches(demo.password(), user.getPasswordHash())) {
                 user.changePassword(encoder.encode(demo.password()));
             }
+            // Same for the transaction PIN, which visitors need to send more than the PIN threshold.
+            if (!user.hasTransactionPin() || !encoder.matches(DemoMode.PIN, user.getTransactionPinHash())
+                    || user.isPinLocked(Instant.now())) {
+                user.setTransactionPin(encoder.encode(DemoMode.PIN));
+            }
             BigDecimal balance = wallets.getWallet(user.getId()).balance();
             if (balance.compareTo(MIN_BALANCE) < 0) {
                 // Internal key (contains ':'), one refill per account per minute at most.

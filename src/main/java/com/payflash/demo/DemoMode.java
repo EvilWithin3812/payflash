@@ -24,6 +24,9 @@ public class DemoMode {
 
     static final String DOMAIN = "@demo.payflash.app";
 
+    /** Transaction PIN of the shared demo accounts, shown on the login page (play money only). */
+    public static final String PIN = "1234";
+
     private static final List<DemoAccount> ACCOUNTS = List.of(
             new DemoAccount("priya" + DOMAIN, "Priya Sharma"),
             new DemoAccount("rahul" + DOMAIN, "Rahul Verma"));

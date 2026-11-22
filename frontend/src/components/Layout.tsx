@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useDemo } from '../api/queries'
+import { useDemo, useRequestSummary } from '../api/queries'
 import { signOut, useSession } from '../auth/session'
 import { VerifyBanner } from '../pages/AccountPages'
 import { LegalLinks } from '../pages/Legal'
@@ -15,6 +15,8 @@ export function Layout() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const demo = useDemo()
+  const requests = useRequestSummary(Boolean(session))
+  const waiting = requests.data?.waitingForMe ?? 0
 
   const logout = () => {
     signOut()
@@ -33,6 +35,13 @@ export function Layout() {
           <nav className="flex flex-1 flex-wrap items-center gap-1" aria-label="Main">
             <NavLink to="/" end className={link}>Wallet</NavLink>
             <NavLink to="/send" className={link}>Send</NavLink>
+            <NavLink to="/requests" className={link}>
+              Requests
+              {waiting > 0 && (
+                <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-bold text-white"
+                  aria-label={`${waiting} waiting for you`}>{waiting}</span>
+              )}
+            </NavLink>
             <NavLink to="/add-money" className={link}>Add money</NavLink>
             <NavLink to="/transactions" className={link}>History</NavLink>
             <NavLink to="/sales" className={link}>Flash sales</NavLink>
@@ -50,7 +59,7 @@ export function Layout() {
       </header>
       {demo.data?.enabled && (
         <div className="bg-slate-900 px-4 py-1.5 text-center text-xs text-slate-200">
-          Live demo: all money here is play money. &ldquo;Add money&rdquo; is free and no real payments are made.
+          Live demo: all money here is play money. &ldquo;Add money&rdquo; is free and no real payments are made.{demo.data.accounts[0]?.pin && <> Transaction PIN for the demo accounts: <strong>{demo.data.accounts[0].pin}</strong>.</>}
         </div>
       )}
       <VerifyBanner />

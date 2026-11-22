@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 import { Account, ForgotPassword, ResetPassword, VerifyEmail } from './pages/AccountPages'
 import { AddMoney } from './pages/AddMoney'
 import { Admin } from './pages/Admin'
+import { Requests } from './pages/Requests'
 import { Dashboard } from './pages/Dashboard'
 import { Login, Signup } from './pages/Auth'
 import { Privacy, Refunds, Terms } from './pages/Legal'
@@ -47,6 +48,7 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="send" element={<Send />} />
+        <Route path="requests" element={<Requests />} />
         <Route path="add-money" element={<AddMoney />} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="sales" element={<Sales />} />

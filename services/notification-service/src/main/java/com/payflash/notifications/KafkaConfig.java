@@ -22,11 +22,17 @@ public class KafkaConfig {
     static final String TOPIC = "wallet.transactions";
     static final String DLT = TOPIC + ".DLT";
     static final String ACCOUNTS_TOPIC = "user.accounts";
+    static final String REQUESTS_TOPIC = "payment.requests";
 
     /** The dead-letter topic belongs to the consumer that fills it. Same partition count as the source topic. */
     @Bean
     NewTopic walletTransactionsDlt() {
         return TopicBuilder.name(DLT).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    NewTopic paymentRequestsDlt() {
+        return TopicBuilder.name(REQUESTS_TOPIC + ".DLT").partitions(3).replicas(1).build();
     }
 
     @Bean
@@ -65,6 +71,28 @@ public class KafkaConfig {
             TransactionEvent event = mapper.readValue(record.value(), TransactionEvent.class);
             log.debug("Notifying for transaction {} (partition {}, offset {})", event.reference(), record.partition(),
                     record.offset());
+            notifications.handle(event);
+        }
+    }
+
+    /** Payment requests: email the person who has to act (or who no longer needs to). */
+    @Component
+    static class PaymentRequestListener {
+
+        private static final Logger log = LoggerFactory.getLogger(PaymentRequestListener.class);
+
+        private final NotificationService notifications;
+        private final ObjectMapper mapper;
+
+        PaymentRequestListener(NotificationService notifications, ObjectMapper mapper) {
+            this.notifications = notifications;
+            this.mapper = mapper;
+        }
+
+        @KafkaListener(topics = REQUESTS_TOPIC, groupId = "${app.notifications.consumer-group:payflash-notifications}")
+        void onRequest(ConsumerRecord<String, String> record) throws JsonProcessingException {
+            PaymentRequestEvent event = mapper.readValue(record.value(), PaymentRequestEvent.class);
+            log.debug("Notifying for payment request {} ({})", event.requestId(), event.kind());
             notifications.handle(event);
         }
     }

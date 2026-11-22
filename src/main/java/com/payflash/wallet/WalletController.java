@@ -75,6 +75,13 @@ public class WalletController {
         return new PagedModel<>(walletService.history(user.id(), page, size));
     }
 
+    @GetMapping("/recipients")
+    @Operation(summary = "People I sent money to recently (newest first)")
+    public java.util.List<WalletDtos.Counterparty> recentRecipients(@AuthenticationPrincipal AuthUser user,
+                                                                   @RequestParam(defaultValue = "8") int limit) {
+        return walletService.recentRecipients(user.id(), limit);
+    }
+
     @GetMapping("/ledger")
     @Operation(summary = "My ledger entries with running balance")
     public PagedModel<LedgerEntryResponse> ledger(@AuthenticationPrincipal AuthUser user,

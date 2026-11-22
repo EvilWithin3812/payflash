@@ -48,12 +48,20 @@ public final class AuthDtos {
     public record DeleteAccountRequest(@NotBlank @Size(max = 72) String password) {
     }
 
+    /** {@code pinSet}: whether a transaction PIN exists; payments above {@code pinThreshold} need it. */
     public record MeResponse(Long id, String email, String fullName, Role role, boolean emailVerified,
-                             Instant createdAt) {
+                             Instant createdAt, boolean pinSet, java.math.BigDecimal pinThreshold) {
 
-        static MeResponse from(User u) {
+        static MeResponse from(User u, java.math.BigDecimal pinThreshold) {
             return new MeResponse(u.getId(), u.getEmail(), u.getFullName(), u.getRole(), u.isEmailVerified(),
-                    u.getCreatedAt());
+                    u.getCreatedAt(), u.hasTransactionPin(), pinThreshold);
         }
+    }
+
+    /** Set or change the transaction PIN; the account password confirms it's really the owner. */
+    public record SetPinRequest(
+            @NotBlank @jakarta.validation.constraints.Pattern(regexp = TransactionPins.PIN_PATTERN,
+                    message = "must be 4 to 6 digits") String pin,
+            @NotBlank @Size(max = 72) String password) {
     }
 }

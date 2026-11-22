@@ -38,6 +38,27 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
             """)
     List<WalletOwner> findOwners(@Param("walletIds") Collection<Long> walletIds);
 
+    /** Recent transfer recipients of a wallet, newest first, skipping deleted accounts. */
+    @Query(value = """
+            select u.full_name as fullName, u.email as email
+            from (select t.to_wallet_id, max(t.created_at) as last_sent
+                  from transactions t
+                  where t.from_wallet_id = :walletId and t.type = 'TRANSFER'
+                  group by t.to_wallet_id) recent
+            join wallets w on w.id = recent.to_wallet_id
+            join users u on u.id = w.user_id
+            where u.deleted_at is null
+            order by recent.last_sent desc
+            limit :limit
+            """, nativeQuery = true)
+    List<RecentRecipient> findRecentRecipients(@Param("walletId") Long walletId, @Param("limit") int limit);
+
+    interface RecentRecipient {
+        String getFullName();
+
+        String getEmail();
+    }
+
     @Query("select w.id from Wallet w where w.userId = :userId")
     Optional<Long> findIdByUserId(@Param("userId") Long userId);
 

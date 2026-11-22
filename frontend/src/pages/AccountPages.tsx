@@ -1,19 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, errorMessage, refreshSession } from '../api/client'
+import { keys, useMe } from '../api/queries'
+import { money } from '../lib/format'
 import { signOut, useSession } from '../auth/session'
 import { Alert, Button, Card, Field, PageTitle, Spinner } from '../components/ui'
 import { AuthShell } from './Auth'
 
-interface Me {
-  id: number
-  email: string
-  fullName: string
-  role: 'USER' | 'ADMIN'
-  emailVerified: boolean
-  createdAt: string
-}
 
 /**
  * Email links carry the token after '#' (never sent to any server, so it can't leak into logs).
@@ -152,7 +146,7 @@ export function VerifyBanner() {
 export function Account() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const me = useQuery({ queryKey: ['me'], queryFn: async () => (await api.get<Me>('/users/me')).data })
+  const me = useMe()
   const resend = useMutation({ mutationFn: () => api.post('/auth/resend-verification') })
 
   const leave = () => {
@@ -209,6 +203,8 @@ export function Account() {
         </p>
       </Card>
 
+      <PinCard />
+
       <Card className="p-6">
         <h2 className="font-semibold text-slate-900">Sessions</h2>
         <p className="mt-1 text-sm text-slate-500">Lost a phone or used a shared computer? Log out everywhere, including here.</p>
@@ -240,5 +236,63 @@ export function Account() {
         )}
       </Card>
     </div>
+  )
+}
+
+/** Set or change the transaction PIN (asked for payments above the threshold). */
+function PinCard() {
+  const queryClient = useQueryClient()
+  const me = useMe()
+  const [pin, setPin] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [password, setPassword] = useState('')
+  const save = useMutation({
+    mutationFn: () => api.put('/users/me/pin', { pin, password }),
+    onSuccess: () => {
+      setPin('')
+      setConfirm('')
+      setPassword('')
+      queryClient.invalidateQueries({ queryKey: keys.me })
+    },
+  })
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    save.mutate()
+  }
+  const mismatch = confirm !== '' && pin !== confirm
+
+  return (
+    <Card className="p-6">
+      <h2 id="pin" className="scroll-mt-24 font-semibold text-slate-900">Transaction PIN</h2>
+      <p className="mt-1 text-sm text-slate-500">
+        A 4 to 6 digit code, like a UPI PIN, asked for when you pay more than{' '}
+        {me.data ? money(me.data.pinThreshold) : 'the limit'}. Five wrong tries lock it for 15 minutes.
+      </p>
+      {me.data && (
+        <p className="mt-3 text-sm">
+          Status:{' '}
+          {me.data.pinSet ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">PIN set</span>
+          ) : (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">No PIN yet</span>
+          )}
+        </p>
+      )}
+      <form onSubmit={submit} className="mt-4 max-w-sm space-y-4">
+        <Field label={me.data?.pinSet ? 'New PIN' : 'PIN'} type="password" inputMode="numeric" autoComplete="off"
+          pattern="[0-9]{4,6}" minLength={4} maxLength={6} required value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} />
+        <Field label="Type the PIN again" type="password" inputMode="numeric" autoComplete="off" maxLength={6} required
+          value={confirm} onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
+          hint={mismatch ? 'The two PINs are different' : undefined} />
+        <Field label="Your account password" type="password" autoComplete="current-password" required
+          value={password} onChange={(e) => setPassword(e.target.value)} />
+        {save.isError && <Alert>{errorMessage(save.error)}</Alert>}
+        {save.isSuccess && <Alert kind="success">Your transaction PIN is saved.</Alert>}
+        <Button type="submit" loading={save.isPending} disabled={mismatch || pin.length < 4}>
+          {me.data?.pinSet ? 'Change PIN' : 'Set PIN'}
+        </Button>
+      </form>
+    </Card>
   )
 }

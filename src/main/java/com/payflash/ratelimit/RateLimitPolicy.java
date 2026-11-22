@@ -26,7 +26,12 @@ public enum RateLimitPolicy {
         if ("POST".equals(request.getMethod()) && (path.equals("/api/v1/wallet/topup")
                 || path.equals("/api/v1/wallet/transfer")
                 || path.startsWith("/api/v1/payments/")
-                || path.startsWith("/api/v1/sales/"))) {
+                || path.startsWith("/api/v1/sales/")
+                || path.equals("/api/v1/requests") || path.startsWith("/api/v1/requests/"))) {
+            return Optional.of(MONEY);
+        }
+        // Each PIN change checks the account password: limit it like money, not like browsing.
+        if ("PUT".equals(request.getMethod()) && path.equals("/api/v1/users/me/pin")) {
             return Optional.of(MONEY);
         }
         return Optional.of(API);

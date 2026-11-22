@@ -94,3 +94,44 @@ export interface PaymentOrder {
   keyId: string
   transactionReference: string | null
 }
+
+/** The signed-in user's profile (GET /users/me). */
+export interface Me {
+  id: number
+  email: string
+  fullName: string
+  role: 'USER' | 'ADMIN'
+  emailVerified: boolean
+  createdAt: string
+  pinSet: boolean
+  /** Payments above this amount need the transaction PIN. */
+  pinThreshold: number
+}
+
+export type RequestStatus = 'PENDING' | 'PAID' | 'DECLINED' | 'CANCELLED'
+
+/** A payment request seen by one side: INCOMING = someone asked me to pay, OUTGOING = I asked someone. */
+export interface PaymentRequest {
+  id: number
+  direction: 'INCOMING' | 'OUTGOING'
+  status: RequestStatus
+  amount: number
+  note: string | null
+  otherParty: Counterparty | null
+  splitGroup: string | null
+  transactionReference: string | null
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export interface RequestSummary {
+  waitingForMe: number
+  waitingForOthers: number
+}
+
+export interface SplitResult {
+  splitGroup: string
+  totalAmount: number
+  myShare: number
+  requests: PaymentRequest[]
+}

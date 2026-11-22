@@ -29,4 +29,9 @@ public class KafkaTopicConfig {
     NewTopic userAccountsTopic() {
         return TopicBuilder.name(Topics.USER_ACCOUNTS).partitions(3).replicas(1).build();
     }
+
+    @Bean
+    NewTopic paymentRequestsTopic() {
+        return TopicBuilder.name(Topics.PAYMENT_REQUESTS).partitions(3).replicas(1).build();
+    }
 }

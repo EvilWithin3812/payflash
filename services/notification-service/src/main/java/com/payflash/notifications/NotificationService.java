@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,7 +40,15 @@ public class NotificationService {
 
     public void handle(TransactionEvent event) {
         for (Email email : emailsFor(event)) {
-            deliverOnce(event, email);
+            deliverOnce(event.reference(), String.valueOf(event.type()), email);
+        }
+    }
+
+    /** A payment request was made, declined or cancelled: tell the other person. */
+    public void handle(PaymentRequestEvent event) {
+        Email email = emailFor(event);
+        if (email != null) {
+            deliverOnce(event.reference(), "REQUEST_" + event.kind(), email);
         }
     }
 
@@ -47,12 +56,12 @@ public class NotificationService {
         return repository.findByUserIdOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, 50));
     }
 
-    private void deliverOnce(TransactionEvent event, Email email) {
+    private void deliverOnce(UUID reference, String type, Email email) {
         Party to = email.to();
-        if (repository.existsByEventReferenceAndUserIdAndChannel(event.reference(), to.userId(),
+        if (repository.existsByEventReferenceAndUserIdAndChannel(reference, to.userId(),
                 Notification.CHANNEL_EMAIL)) {
             metrics.counter("payflash.notifications.duplicates").increment();
-            log.debug("Duplicate event {} for user {}; already notified", event.reference(), to.userId());
+            log.debug("Duplicate event {} for user {}; already notified", reference, to.userId());
             return;
         }
         var message = new SimpleMailMessage();
@@ -64,12 +73,53 @@ public class NotificationService {
         // a duplicate email is acceptable, a silently missing one is not (at-least-once).
         mailSender.send(message);
         try {
-            repository.saveAndFlush(new Notification(event.reference(), to.userId(), Notification.CHANNEL_EMAIL,
+            repository.saveAndFlush(new Notification(reference, to.userId(), Notification.CHANNEL_EMAIL,
                     to.email(), email.subject(), email.body()));
-            metrics.counter("payflash.notifications.sent", "type", String.valueOf(event.type())).increment();
+            metrics.counter("payflash.notifications.sent", "type", type).increment();
         } catch (DataIntegrityViolationException raced) {
-            log.debug("Another consumer recorded event {} for user {} first", event.reference(), to.userId());
+            log.debug("Another consumer recorded event {} for user {} first", reference, to.userId());
         }
+    }
+
+    private Email emailFor(PaymentRequestEvent event) {
+        String amount = format(event.amount(), event.currency());
+        String forWhat = event.note() == null ? "" : " for \"" + event.note() + "\"";
+        Party requester = requireParty(event.requester(), event);
+        Party payer = requireParty(event.payer(), event);
+        return switch (String.valueOf(event.kind())) {
+            case "REQUESTED" -> new Email(payer, requester.fullName() + " requested " + amount + " from you",
+                    requestBody(payer, requester.fullName() + " (" + requester.email() + ") asked you to pay "
+                            + amount + forWhat + ".\n\nOpen PayFlash and go to Requests to pay or decline.", event));
+            case "DECLINED" -> new Email(requester, payer.fullName() + " declined your request for " + amount,
+                    requestBody(requester, payer.fullName() + " (" + payer.email() + ") declined your request for "
+                            + amount + forWhat + ".", event));
+            case "CANCELLED" -> new Email(payer, requester.fullName() + " cancelled a request for " + amount,
+                    requestBody(payer, requester.fullName() + " cancelled their request for " + amount + forWhat
+                            + ". You don't need to pay it.", event));
+            default -> {
+                log.info("No notification for request event kind {}", event.kind());
+                yield null;
+            }
+        };
+    }
+
+    private static Party requireParty(Party party, PaymentRequestEvent event) {
+        if (party == null || party.userId() == null || party.email() == null) {
+            throw new IllegalStateException("Request event " + event.reference() + " is missing a party");
+        }
+        return party;
+    }
+
+    private static String requestBody(Party to, String line, PaymentRequestEvent event) {
+        return """
+                Hi %s,
+
+                %s
+
+                Request #%d
+
+                - PayFlash
+                """.formatted(to.fullName(), line, event.requestId());
     }
 
     private List<Email> emailsFor(TransactionEvent event) {

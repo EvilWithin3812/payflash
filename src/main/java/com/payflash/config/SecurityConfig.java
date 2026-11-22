@@ -42,8 +42,10 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         // Moving money needs a verified email: stops throwaway accounts from holding sale stock.
+                        // Requests email other people, so the same rule stops throwaway accounts from spamming.
                         .requestMatchers(HttpMethod.POST, "/api/v1/wallet/topup", "/api/v1/wallet/transfer",
-                                "/api/v1/payments/**", "/api/v1/sales/**")
+                                "/api/v1/payments/**", "/api/v1/sales/**", "/api/v1/requests/**",
+                                "/api/v1/requests")
                         .hasAuthority(JwtAuthFilter.EMAIL_VERIFIED)
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex

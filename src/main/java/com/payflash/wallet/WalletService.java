@@ -50,9 +50,12 @@ public class WalletService {
     private final UserRepository users;
     private final OutboxService outbox;
     private final MeterRegistry metrics;
+    private final com.payflash.auth.TransactionPins pins;
 
     public WalletService(WalletRepository wallets, WalletTransactionRepository transactions,
-                         LedgerEntryRepository ledger, UserRepository users, OutboxService outbox, MeterRegistry metrics) {
+                         LedgerEntryRepository ledger, UserRepository users, OutboxService outbox, MeterRegistry metrics,
+                         com.payflash.auth.TransactionPins pins) {
+        this.pins = pins;
         this.wallets = wallets;
         this.transactions = transactions;
         this.ledger = ledger;
@@ -113,12 +116,33 @@ public class WalletService {
     @Transactional
     public MoneyMovementResult transfer(Long senderUserId, TransferRequest req, String idempotencyKey) {
         validateKey(idempotencyKey);
-        BigDecimal amount = req.amount();
-        Long fromId = walletIdOf(senderUserId);
-        Long toId = users.findByEmailIgnoreCase(req.recipientEmail().trim())
+        Long recipientUserId = users.findByEmailIgnoreCase(req.recipientEmail().trim())
                 .filter(u -> !u.isDeleted())
-                .flatMap(u -> wallets.findIdByUserId(u.getId()))
+                .map(com.payflash.auth.User::getId)
                 .orElseThrow(() -> BusinessException.notFound("Recipient not found"));
+        if (recipientUserId.equals(senderUserId)) {
+            throw BusinessException.badRequest("SELF_TRANSFER", "Cannot transfer to your own wallet");
+        }
+        // Before any money moves: a wrong PIN throws and nothing happens.
+        pins.verifyFor(senderUserId, req.amount(), req.pin());
+        return moveBetweenUsers(senderUserId, recipientUserId, req.amount(), req.note(), idempotencyKey);
+    }
+
+    /**
+     * Moves money from one user to another, for callers that already know both users and have checked the
+     * PIN (paying a payment request). Joins the caller's transaction.
+     */
+    @Transactional
+    public MoneyMovementResult payUser(Long senderUserId, Long recipientUserId, BigDecimal amount, String note,
+                                       String idempotencyKey) {
+        validateKey(idempotencyKey);
+        return moveBetweenUsers(senderUserId, recipientUserId, amount, note, idempotencyKey);
+    }
+
+    private MoneyMovementResult moveBetweenUsers(Long senderUserId, Long recipientUserId, BigDecimal amount,
+                                                 String note, String idempotencyKey) {
+        Long fromId = walletIdOf(senderUserId);
+        Long toId = walletIdOf(recipientUserId);
         if (fromId.equals(toId)) {
             throw BusinessException.badRequest("SELF_TRANSFER", "Cannot transfer to your own wallet");
         }
@@ -138,12 +162,21 @@ public class WalletService {
         to.credit(amount);
 
         WalletTransaction tx = transactions.save(new WalletTransaction(TransactionType.TRANSFER,
-                TransactionStatus.COMPLETED, fromId, toId, amount, req.note(), senderUserId, idempotencyKey));
+                TransactionStatus.COMPLETED, fromId, toId, amount, note, senderUserId, idempotencyKey));
         ledger.save(new LedgerEntry(tx.getId(), fromId, Direction.DEBIT, amount, from.getBalance()));
         ledger.save(new LedgerEntry(tx.getId(), toId, Direction.CREDIT, amount, to.getBalance()));
 
         publishCompleted(tx, from.getCurrency());
         return new MoneyMovementResult(TransactionResponse.from(tx, fromId, recipientOf(toId)), false);
+    }
+
+    /** People this user sent money to most recently (newest first), for one-tap "send again". */
+    @Transactional(readOnly = true)
+    public List<Counterparty> recentRecipients(Long userId, int limit) {
+        Long walletId = walletOf(userId).getId();
+        return wallets.findRecentRecipients(walletId, Math.max(1, Math.min(limit, 20))).stream()
+                .map(r -> new Counterparty(r.getFullName(), r.getEmail(), false))
+                .toList();
     }
 
     /**

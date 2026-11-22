@@ -46,6 +46,15 @@ public class User {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Column(name = "transaction_pin_hash")
+    private String transactionPinHash;
+
+    @Column(name = "pin_failed_attempts", nullable = false)
+    private int pinFailedAttempts;
+
+    @Column(name = "pin_locked_until")
+    private Instant pinLockedUntil;
+
     protected User() {
         // for JPA
     }
@@ -125,6 +134,50 @@ public class User {
         this.fullName = "Deleted user";
         this.passwordHash = unusablePasswordHash;
         this.deletedAt = Instant.now();
+        this.transactionPinHash = null;
         revokeTokens();
+    }
+
+    public String getTransactionPinHash() {
+        return transactionPinHash;
+    }
+
+    public boolean hasTransactionPin() {
+        return transactionPinHash != null;
+    }
+
+    public boolean isPinLocked(Instant now) {
+        return pinLockedUntil != null && pinLockedUntil.isAfter(now);
+    }
+
+    public Instant getPinLockedUntil() {
+        return pinLockedUntil;
+    }
+
+    public int getPinFailedAttempts() {
+        return pinFailedAttempts;
+    }
+
+    /** Sets or changes the PIN and clears any lock from earlier wrong guesses. */
+    public void setTransactionPin(String pinHash) {
+        this.transactionPinHash = pinHash;
+        this.pinFailedAttempts = 0;
+        this.pinLockedUntil = null;
+    }
+
+    /** Counts a wrong PIN; after {@code maxAttempts} the PIN is locked until {@code lockUntil}. */
+    public void recordWrongPin(int maxAttempts, Instant lockUntil) {
+        pinFailedAttempts++;
+        if (pinFailedAttempts >= maxAttempts) {
+            pinLockedUntil = lockUntil;
+            pinFailedAttempts = 0;
+        }
+    }
+
+    public void recordCorrectPin() {
+        if (pinFailedAttempts != 0 || pinLockedUntil != null) {
+            pinFailedAttempts = 0;
+            pinLockedUntil = null;
+        }
     }
 }

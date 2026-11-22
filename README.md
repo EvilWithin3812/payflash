@@ -6,6 +6,8 @@ when thousands of requests arrive at once.
 
 > **Status:** all five roadmap phases are complete.
 > - **Wallet:** double-entry ledger, row locks, idempotency keys, transactional outbox → Kafka.
+> - **Like a UPI app:** request money, split a bill, pay or decline requests, recent recipients, and a
+>   **transaction PIN** for payments above ₹500 (locked after 5 wrong tries).
 > - **Payments and protection:** Razorpay top-ups with HMAC-verified webhooks; Redis rate limiting.
 > - **Flash sale:** Redis Lua + Kafka, **load-tested at ~4,800 req/s with zero oversell**.
 > - **Frontend:** React, with live stock over WebSocket.
@@ -15,7 +17,7 @@ when thousands of requests arrive at once.
 >   Terms / Privacy / Refund pages, daily database backups, uptime and Prometheus alerts, and a security review
 >   with every finding fixed or documented ([Security](#security)).
 >
-> 63 automated tests. The whole system (14 containers) starts with one `docker compose up`.
+> 71 automated tests. The whole system (14 containers) starts with one `docker compose up`.
 
 **Jump to:** [Run it](#run-it-everything-in-docker) · [Architecture](#architecture) ·
 [Design decisions](#key-design-decisions-interview-talking-points) · [Security](#security) · [Load test](#load-test) ·
@@ -163,6 +165,16 @@ Browser                      PayFlash                              Razorpay
 26. **Deletion that keeps the books balanced.** Ledger rows must survive, so a deleted account is anonymised
     (name, email and password removed, all sessions revoked) rather than removed, its wallet must be empty, and an
     `AccountDeleted` event tells the notification service to delete its copy of the user's data.
+27. **A PIN count that survives the rollback.** A wrong PIN aborts the payment, and the payment's transaction
+    rolls back. If the wrong-guess counter were written in that same transaction, it would roll back too and the
+    PIN could be guessed forever. So the guess is recorded in its own `REQUIRES_NEW` transaction, in Postgres
+    rather than Redis, so an outage can't switch the lock off. A test proves the 5th wrong PIN locks it.
+28. **Paying a request can't happen twice.** "Pay" locks the request row, checks it is still `PENDING`, and makes
+    an ordinary transfer with an internal idempotency key (`request:<id>`). Two clicks, or "Pay" racing
+    "Decline", run one after the other; the second sees `PAID` and gets `409`.
+29. **Split bills in paise.** ₹100 between three people can't be exact: the shares are 33.34 + 33.33 + 33.33,
+    computed with `BigDecimal` rounding down and the leftover paise handed out one at a time, so the requests
+    always add up to the bill.
 
 ## Security
 
@@ -174,6 +186,8 @@ and what changed:
 | Passwords | bcrypt; 8-72 characters; **account locked for 15 minutes after 5 wrong passwords** (stops guessing spread over many IPs); login takes the same time whether or not the email exists |
 | Sessions | 15-minute access tokens, 7-day refresh tokens, HS256 pinned, token type checked; **revocable** (reset, log out everywhere, deletion) |
 | Email ownership | Adding, sending or spending money needs a **verified email**; links are single-use, hashed, expiring |
+| Transaction PIN | Payments above ₹500 need a 4-6 digit PIN (bcrypt-hashed, set with the account password). **5 wrong PINs lock it for 15 minutes**; the count is kept in Postgres and survives the failed payment's rollback |
+| Payment requests | Only the payer can pay or decline, only the requester can cancel (anyone else gets `404`); max 30 open requests per person; verified email required, since requests email other people |
 | Enumeration | "Forgot password" answers the same for unknown emails |
 | Flash-sale abuse | **One hold per person per sale**, even if it expired, so bots can't re-hold stock they never pay for; verified email required to reserve |
 | Live stock socket | Clients may only **subscribe** to `/topic/sales/{id}`; sending fake stock messages to other viewers is rejected |
@@ -200,9 +214,11 @@ Known limits, and the next steps for a high-value deployment:
 |---|---|
 | Login / Sign up | JWT auth. The access token refreshes automatically on a 401 (concurrent 401s share one refresh call) |
 | Wallet | Balance, recent activity, live sales |
-| Send money | Transfer by email. One `Idempotency-Key` per attempt, so a double-click or a retry never pays twice |
+| Send money | Transfer by email or one tap on a **recent person**; asks for the **PIN** above ₹500. One `Idempotency-Key` per attempt, so a double-click or a retry never pays twice |
+| Requests | **Request money** and **split a bill**; "To pay" (with Pay / Decline) and "Requested by me" (with Cancel); a badge in the menu shows what's waiting |
+| Account | Profile, **transaction PIN**, log out everywhere, delete account |
 | Add money | Razorpay Checkout (test mode, loaded on demand) or the instant demo top-up |
-| History | Paginated transactions (top-ups, transfers, purchases) |
+| History | Paginated transactions; click one to see who sent or received it, the note, status and reference |
 | Flash sales | Cards with **live stock bars** and countdowns (one shared STOMP connection) |
 | Sale page | Big live counter → *Buy now* → `PROCESSING` (polls) → `HELD` with a pay-by countdown → *Pay* → `PAID` |
 | My orders / Admin | Order history; admins create sales and check ledger reconciliation |
@@ -277,7 +293,8 @@ Admin endpoints (create sales, reconciliation) need an ADMIN token: log in as th
 | POST | `/api/v1/auth/resend-verification` | User | Email a new verification link (at most one per minute) |
 | POST | `/api/v1/auth/forgot-password` | – | `{email}`. Always `202`, whether or not the account exists |
 | POST | `/api/v1/auth/reset-password` | – | `{token, newPassword}`. Logs out every device |
-| GET | `/api/v1/users/me` | User | Profile, including `emailVerified` |
+| GET | `/api/v1/users/me` | User | Profile, including `emailVerified`, `pinSet` and `pinThreshold` |
+| PUT | `/api/v1/users/me/pin` | User | `{pin, password}`. Set or change the transaction PIN (4-6 digits) |
 | POST | `/api/v1/users/me/logout-all` | User | Log out on every device |
 | DELETE | `/api/v1/users/me` | User | `{password}`. Deletes the account (wallet must be empty) |
 | GET | `/api/v1/health` | – | `{"status":"UP"}` for uptime monitors |
@@ -287,8 +304,16 @@ Admin endpoints (create sales, reconciliation) need an ADMIN token: log in as th
 | POST | `/api/v1/payments/verify` | User | `{razorpayOrderId, razorpayPaymentId, razorpaySignature}` → credits wallet once |
 | GET | `/api/v1/payments/orders/{orderId}` | User | Order status (`CREATED` / `PAID` / `FAILED`) |
 | POST | `/api/v1/payments/webhook` | HMAC | Razorpay server-to-server. `X-Razorpay-Signature` header |
-| POST | `/api/v1/wallet/transfer` | User | `Idempotency-Key` header required. `{recipientEmail, amount, note}` |
-| GET | `/api/v1/wallet/transactions?page=0&size=20` | User | History, newest first |
+| POST | `/api/v1/wallet/transfer` | User | `Idempotency-Key` header required. `{recipientEmail, amount, note, pin}`; `pin` needed above ₹500 (`PIN_NOT_SET` / `PIN_REQUIRED` / `WRONG_PIN` / `429 PIN_LOCKED`) |
+| GET | `/api/v1/wallet/transactions?page=0&size=20` | User | History, newest first; transfers include the other person (`counterparty`) |
+| GET | `/api/v1/wallet/recipients` | User | People I sent money to recently, newest first |
+| POST | `/api/v1/requests` | User | `{payerEmail, amount, note}`. Ask someone to pay me (they're emailed) |
+| POST | `/api/v1/requests/split` | User | `{totalAmount, note, friendEmails[], includeMe}`. One request per friend, equal shares |
+| GET | `/api/v1/requests?direction=INCOMING` | User | Requests to me (`INCOMING`) or from me (`OUTGOING`) |
+| GET | `/api/v1/requests/summary` | User | `{waitingForMe, waitingForOthers}` for the menu badge |
+| POST | `/api/v1/requests/{id}/pay` | User | `{pin}` above ₹500. Pays once; a second try gets `409 REQUEST_NOT_PENDING` |
+| POST | `/api/v1/requests/{id}/decline` | User | Payer only |
+| POST | `/api/v1/requests/{id}/cancel` | User | Requester only |
 | GET | `/api/v1/wallet/ledger?page=0&size=20` | User | Ledger rows with running balance |
 | GET | `/api/v1/sales` | – | Upcoming and live sales with units left |
 | GET | `/api/v1/sales/{id}` | – | One sale. Live stock: STOMP over WebSocket at `/ws`, topic `/topic/sales/{id}` |
@@ -320,7 +345,7 @@ curl -X POST localhost:8090/api/v1/wallet/topup -H "Authorization: Bearer $T" \
 
 ## Tests
 
-63 tests, all passing: 57 in the core app, 3 in the notification service and 3 in the gateway, plus frontend lint and type-check.
+71 tests, all passing: 64 in the core app, 4 in the notification service and 3 in the gateway, plus frontend lint and type-check.
 Integration tests run against real Postgres, Redis and Kafka containers:
 
 - `WalletConcurrencyTest`, against a real Postgres:
@@ -334,6 +359,11 @@ Integration tests run against real Postgres, Redis and Kafka containers:
   reveals nothing about unknown emails; a reset changes the password and kills old refresh *and* access tokens;
   "log out everywhere"; deletion anonymises the account, blocks login and transfers to it, and is refused
   while the wallet holds money; 5 wrong passwords lock the account; terms and plain names are required.
+- `RequestsPinAndRecipientsTest`: transfers above ₹500 need the right PIN (not set / missing / wrong, with
+  attempts left); **5 wrong PINs lock it even for the right one**, and nothing moves; a request is paid once
+  (a second pay gets `409`), only by its payer; decline, cancel, self-requests, unknown people and empty wallets;
+  big requests need the PIN; **₹900 split three ways is 300 each, ₹100 between three friends is 33.34 + 33.33 + 33.33**;
+  recent recipients are newest first.
 - `PaymentFlowTest` (Razorpay HTTP API mocked, real HMACs):
   - **10 verify calls + 10 webhooks fired at once → wallet credited exactly once.**
   - Idempotent order creation, forged signatures rejected, another user's order not confirmable,
@@ -344,7 +374,8 @@ Integration tests run against real Postgres, Redis and Kafka containers:
     Insufficient funds keep the hold. An expired hold returns its unit and pay gets `410`. Sale window and
     ownership rules. Inventory rebuilt from the DB after Redis data loss.
 - `notification-service` `NotificationFlowTest` (real Postgres + Kafka): an event published exactly as the
-  core app sends it emails both parties once, and a redelivery sends nothing. Users see only their own
+  core app sends it emails both parties once, and a redelivery sends nothing. Payment-request events email
+  the person who has to act (asked → payer, declined → requester). Users see only their own
   notifications. Refresh, missing and forged tokens are rejected.
 - `api-gateway` `GatewayRoutingTest`: routing to a fake backend, `X-Request-Id` added (and unsafe ones replaced),
   `X-Forwarded-For` passed on, and a dead service answered by the circuit breaker's JSON `503`.
