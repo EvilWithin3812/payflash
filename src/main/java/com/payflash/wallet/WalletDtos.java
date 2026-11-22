@@ -35,7 +35,23 @@ public final class WalletDtos {
             @Size(max = 255) String note) {
     }
 
-    /** A transaction seen from the perspective of the calling user's wallet. */
+    /** The other person in a transfer, so each side can see who sent or received the money. */
+    public record Counterparty(String fullName, String email, boolean deleted) {
+
+        static Counterparty of(WalletRepository.WalletOwner owner) {
+            if (owner == null) {
+                return null;
+            }
+            return owner.deleted()
+                    ? new Counterparty("Deleted user", null, true)
+                    : new Counterparty(owner.fullName(), owner.email(), false);
+        }
+    }
+
+    /**
+     * A transaction seen from the perspective of the calling user's wallet. {@code counterparty} is the
+     * other person for a transfer, and null for top-ups and purchases (the other side is outside PayFlash).
+     */
     public record TransactionResponse(
             UUID reference,
             TransactionType type,
@@ -43,17 +59,27 @@ public final class WalletDtos {
             Direction direction,
             BigDecimal amount,
             Long counterpartyWalletId,
+            Counterparty counterparty,
             String note,
             Instant createdAt) {
 
-        static TransactionResponse from(WalletTransaction t, Long myWalletId) {
+        static TransactionResponse from(WalletTransaction t, Long myWalletId, Counterparty counterparty) {
             boolean outgoing = myWalletId.equals(t.getFromWalletId());
             return new TransactionResponse(
                     t.getReference(), t.getType(), t.getStatus(),
                     outgoing ? Direction.DEBIT : Direction.CREDIT,
                     t.getAmount(),
-                    outgoing ? t.getToWalletId() : t.getFromWalletId(),
+                    counterpartyWalletIdOf(t, myWalletId),
+                    counterparty,
                     t.getNote(), t.getCreatedAt());
+        }
+
+        static TransactionResponse from(WalletTransaction t, Long myWalletId) {
+            return from(t, myWalletId, null);
+        }
+
+        static Long counterpartyWalletIdOf(WalletTransaction t, Long myWalletId) {
+            return myWalletId.equals(t.getFromWalletId()) ? t.getToWalletId() : t.getFromWalletId();
         }
     }
 

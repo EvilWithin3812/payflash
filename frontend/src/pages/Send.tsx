@@ -46,6 +46,12 @@ export function Send() {
           <div className="space-y-4 text-center">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">✓</div>
             <p className="text-lg font-semibold">Sent {money(transfer.data.amount)}</p>
+            {transfer.data.counterparty && (
+              <p className="text-sm text-slate-700">
+                to <span className="font-medium">{transfer.data.counterparty.fullName}</span>
+                {transfer.data.counterparty.email && <> ({transfer.data.counterparty.email})</>}
+              </p>
+            )}
             <p className="text-sm text-slate-500">Reference {transfer.data.reference}</p>
             <Button variant="secondary" onClick={another}>Send another</Button>
           </div>

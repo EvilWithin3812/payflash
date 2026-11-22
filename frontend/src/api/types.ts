@@ -27,6 +27,13 @@ export interface Wallet {
 export type TransactionType = 'TOPUP' | 'TRANSFER' | 'PURCHASE'
 export type Direction = 'DEBIT' | 'CREDIT'
 
+/** The other person in a transfer (null for top-ups and purchases). */
+export interface Counterparty {
+  fullName: string
+  email: string | null
+  deleted: boolean
+}
+
 export interface Transaction {
   reference: string
   type: TransactionType
@@ -34,6 +41,7 @@ export interface Transaction {
   direction: Direction
   amount: number
   counterpartyWalletId: number | null
+  counterparty: Counterparty | null
   note: string | null
   createdAt: string
 }

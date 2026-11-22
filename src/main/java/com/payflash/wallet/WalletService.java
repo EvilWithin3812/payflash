@@ -4,6 +4,7 @@ import com.payflash.auth.UserRepository;
 import com.payflash.common.BusinessException;
 import com.payflash.outbox.OutboxService;
 import com.payflash.outbox.Topics;
+import com.payflash.wallet.WalletDtos.Counterparty;
 import com.payflash.wallet.WalletDtos.LedgerEntryResponse;
 import com.payflash.wallet.WalletDtos.MoneyMovementResult;
 import com.payflash.wallet.WalletDtos.ReconciliationReport;
@@ -130,7 +131,7 @@ public class WalletService {
 
         var existing = findReplay(senderUserId, idempotencyKey, TransactionType.TRANSFER, toId, amount);
         if (existing != null) {
-            return new MoneyMovementResult(TransactionResponse.from(existing, fromId), true);
+            return new MoneyMovementResult(TransactionResponse.from(existing, fromId, recipientOf(toId)), true);
         }
 
         from.debit(amount); // throws INSUFFICIENT_FUNDS -> whole transaction rolls back
@@ -142,7 +143,7 @@ public class WalletService {
         ledger.save(new LedgerEntry(tx.getId(), toId, Direction.CREDIT, amount, to.getBalance()));
 
         publishCompleted(tx, from.getCurrency());
-        return new MoneyMovementResult(TransactionResponse.from(tx, fromId), false);
+        return new MoneyMovementResult(TransactionResponse.from(tx, fromId, recipientOf(toId)), false);
     }
 
     /**
@@ -175,7 +176,31 @@ public class WalletService {
     public Page<TransactionResponse> history(Long userId, int page, int size) {
         Long walletId = walletOf(userId).getId();
         var pageable = PageRequest.of(page, clampSize(size), Sort.by(Sort.Direction.DESC, "createdAt", "id"));
-        return transactions.findAllForWallet(walletId, pageable).map(t -> TransactionResponse.from(t, walletId));
+        Page<WalletTransaction> results = transactions.findAllForWallet(walletId, pageable);
+        // One query for the people on the other side of every transfer on this page (no N+1).
+        List<Long> otherWallets = results.stream()
+                .filter(t -> t.getType() == TransactionType.TRANSFER)
+                .map(t -> TransactionResponse.counterpartyWalletIdOf(t, walletId))
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, WalletRepository.WalletOwner> owners = otherWallets.isEmpty() ? Map.of()
+                : wallets.findOwners(otherWallets).stream()
+                        .collect(Collectors.toMap(WalletRepository.WalletOwner::walletId, Function.identity()));
+        return results.map(t -> TransactionResponse.from(t, walletId, counterpartyOf(t, walletId, owners)));
+    }
+
+    private static Counterparty counterpartyOf(WalletTransaction t, Long myWalletId,
+                                               Map<Long, WalletRepository.WalletOwner> owners) {
+        if (t.getType() != TransactionType.TRANSFER) {
+            return null;
+        }
+        return Counterparty.of(owners.get(TransactionResponse.counterpartyWalletIdOf(t, myWalletId)));
+    }
+
+    /** The recipient of a transfer, shown on the sender's confirmation screen. */
+    private Counterparty recipientOf(Long toWalletId) {
+        return Counterparty.of(wallets.findOwners(List.of(toWalletId)).stream().findFirst().orElse(null));
     }
 
     @Transactional(readOnly = true)

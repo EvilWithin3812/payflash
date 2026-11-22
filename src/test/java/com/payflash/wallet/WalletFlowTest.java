@@ -93,6 +93,45 @@ class WalletFlowTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void historyShowsWhoSentAndWhoReceivedEachTransfer() throws Exception {
+        var alice = TestUsers.signup(mvc);
+        var bob = TestUsers.signup(mvc);
+        topUp(alice, "100.00", UUID.randomUUID().toString()).andExpect(status().isCreated());
+
+        // The sender's confirmation names the recipient.
+        transfer(alice, bob.email(), "100.00", UUID.randomUUID().toString())
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.counterparty.fullName").value("Test User"))
+                .andExpect(jsonPath("$.counterparty.email").value(bob.email()));
+
+        // Sender's history: the transfer names the recipient; the top-up has nobody on the other side.
+        mvc.perform(get("/api/v1/wallet/transactions").header("Authorization", alice.bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].type").value("TRANSFER"))
+                .andExpect(jsonPath("$.content[0].direction").value("DEBIT"))
+                .andExpect(jsonPath("$.content[0].counterparty.email").value(bob.email()))
+                .andExpect(jsonPath("$.content[0].counterparty.deleted").value(false))
+                .andExpect(jsonPath("$.content[1].type").value("TOPUP"))
+                .andExpect(jsonPath("$.content[1].counterparty").doesNotExist());
+
+        // Receiver's history names the sender.
+        mvc.perform(get("/api/v1/wallet/transactions").header("Authorization", bob.bearer()))
+                .andExpect(jsonPath("$.content[0].direction").value("CREDIT"))
+                .andExpect(jsonPath("$.content[0].counterparty.fullName").value("Test User"))
+                .andExpect(jsonPath("$.content[0].counterparty.email").value(alice.email()));
+
+        // Once the sender deletes their account, the receiver no longer sees their personal details.
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/v1/users/me")
+                        .header("Authorization", alice.bearer())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"password123\"}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/wallet/transactions").header("Authorization", bob.bearer()))
+                .andExpect(jsonPath("$.content[0].counterparty.fullName").value("Deleted user"))
+                .andExpect(jsonPath("$.content[0].counterparty.email").doesNotExist())
+                .andExpect(jsonPath("$.content[0].counterparty.deleted").value(true));
+    }
+
+    @Test
     void retryWithSameIdempotencyKeyDoesNotChargeTwice() throws Exception {
         var alice = TestUsers.signup(mvc);
         var bob = TestUsers.signup(mvc);

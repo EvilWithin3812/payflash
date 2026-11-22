@@ -25,6 +25,19 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
             """)
     Optional<WalletEvents.Party> findParty(@Param("walletId") Long walletId);
 
+    /** Owner of a wallet, for showing who is on the other side of a transfer. */
+    record WalletOwner(Long walletId, String email, String fullName, boolean deleted) {
+    }
+
+    /** Owners of several wallets in one query (one page of history needs at most a page of them). */
+    @Query("""
+            select new com.payflash.wallet.WalletRepository$WalletOwner(
+                       w.id, u.email, u.fullName, case when u.deletedAt is not null then true else false end)
+            from Wallet w join User u on u.id = w.userId
+            where w.id in :walletIds
+            """)
+    List<WalletOwner> findOwners(@Param("walletIds") Collection<Long> walletIds);
+
     @Query("select w.id from Wallet w where w.userId = :userId")
     Optional<Long> findIdByUserId(@Param("userId") Long userId);
 
