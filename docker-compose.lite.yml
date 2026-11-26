@@ -1,0 +1,45 @@
+# Lite mode: the full app on a small server (4 GB RAM). Use on top of the other files:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml \
+#                  -f docker-compose.lite.yml up -d --build
+# Optional: leave this file out of the command and the full stack runs, exactly as before.
+#
+# Every feature users see still works (wallet, requests, PIN, flash sales, emails, notifications).
+# What changes:
+#   * The developer monitoring tools don't start: Prometheus, Grafana, Zipkin (and Kafka UI, already off in
+#     production). Tracing is switched off, so nothing tries to send traces to a missing Zipkin.
+#   * Smaller memory limits for Kafka and the three Java services.
+#
+# Need the dashboards for an interview demo? Start them on the server for a while, then stop them:
+#   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml \
+#        -f docker-compose.lite.yml --profile monitoring up -d
+#   (stop: the same command with "stop prometheus grafana zipkin" instead of "--profile monitoring up -d")
+# Traces only appear while tracing is on: remove MANAGEMENT_TRACING_ENABLED below for that.
+services:
+  zipkin:
+    profiles: ["monitoring"]
+
+  prometheus:
+    profiles: ["monitoring"]
+
+  grafana:
+    profiles: ["monitoring"]
+
+  kafka:
+    mem_limit: 768m
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+
+  app:
+    mem_limit: 768m
+    environment:
+      MANAGEMENT_TRACING_ENABLED: "false"
+
+  notification-service:
+    mem_limit: 448m
+    environment:
+      MANAGEMENT_TRACING_ENABLED: "false"
+
+  gateway:
+    mem_limit: 384m
+    environment:
+      MANAGEMENT_TRACING_ENABLED: "false"
